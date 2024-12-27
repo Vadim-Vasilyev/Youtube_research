@@ -1,4 +1,4 @@
-**Формат хранения данных о видео (json)**:
+**Формат хранения данных о видео**:
 ```
 {
 	"query_1": [
@@ -24,11 +24,47 @@
 
 ```
 
-**Формат хранения данных о ключах следующих страниц (json)**:
+**Формат хранения комментариев**:
 ```
 {
-	"query_1": nextPageToken_1,
-	"query_2": nextPageToken_2,
-	...
+    "videoId_1" : [
+        {
+            "topLevelComment": {
+                "commentId": string,
+                "authorDisplayName": string,
+                "text": string,
+                "likeCount": int,
+                "publishedAt": datetime
+            },
+            "replies": [
+                {
+                    "commentId": string,
+                    "authorDisplayName": string,
+                    "text": string,
+                    "parentId": string,
+                    "likeCount": int,
+                    "publishedAt": datetime
+                },
+                ...
+            ]
+        },
+        ...
+    ],
+    ...
+}
+```
+
+**Формат хранения информации, необходимой для корректной работы методов parse_videos и parse_comments между сессиями**:
+```
+{
+    "Search.list": {
+    	"query_1": nextPageToken_1,
+    	"query_2": nextPageToken_2,
+    	...
+    },
+    "CommentThreads.list": {
+        "query_1": next_video_index
+        ...
+    }
 }
 ```
