@@ -238,6 +238,38 @@ class Parser:
         response = request.execute()
         return response
 
+    def __parse_video_comments(self, video_id):
+        """
+        Загружает и возвращает все страницы комментариев к видео по его id
+        """
+        next_page_token = None
+        responses = []
+        while True:
+            response = self.__commentThreads_request(video_id, next_page_token)
+            # есть topComment, есть replies. Если реплаев меньше, чем totalReplyCount,
+            # нужно делать отдельный запрос Comments.list
+            for thread in response["items"]:
+                if "replies" in thread and thread["snippet"]["totalReplyCount"] > len(thread["replies"]):
+                    thread["replies"]["comments"] = []
+                    next_replies_token = None
+                    while True:
+                        parent_id = thread["snippet"]["topLevelComment"]["id"]
+                        replies_response = self.__comments_list_request(parent_id, next_replies_token)
+    
+                        thread["replies"]["comments"] += replies_response["items"]
+                        
+                        if "nextPageToken" not in replies_response:
+                            break
+                        next_replies_token = replies_response["nextPageToken"]
+            
+            responses.append(response)
+            
+            if "nextPageToken" not in response:
+                break
+            next_page_token = response["nextPageToken"]
+            
+        return [thread for response in responses for thread in response["items"]]
+
     def parse_videos(
         self, 
         query: str,
@@ -283,75 +315,6 @@ class Parser:
             if len(response_search["items"]) < max_request_results:
                 break
 
-    def get_parsed_videos(self, query: str = None, video_file: str = None) -> dict | list:
-        """
-        Если query = None, возвращает словарь, где ключи - запросы,
-        а значения - массивы с видео, полученными за всё время по этому запросу.
-        Если query передан, возвращает один массив с видео, соответствующих
-        такому запросу. |
-        Если video_file не передан, результаты будут получены из собственного
-        файла, заданного при инициализации. Иначе результат будет получен из
-        переданного файла.
-        """
-        if video_file is None:
-            video_file = self.video_file
-            
-        try:
-            with open(video_file, "r") as f:
-                videos = json.loads(f.read())
-                if query:
-                    return videos.get(query, [])
-                return videos
-        except FileNotFoundError:
-            return [] if query else {}
-
-    def join_video_files(self, video_file_1: str, video_file_2: str, output: str) -> None:
-        """
-        Объединяет два файла, хранящие информацию о видео,
-        в один новый файл - output. Старые файлы не удаляются
-        """
-        with open(video_file_1, "r") as fin_1, \
-        open(video_file_2, "r") as fin_2, \
-        open(output, "w") as f_out:
-            videos_1 = json.loads(fin_1.read())
-            videos_2 = json.loads(fin_2.read())
-            videos_new = {}
-            for query in set(videos_1.keys()).union(set(videos_2.keys())):
-                videos_new[query] = videos_1.get(query, []) + videos_2.get(query, [])
-            f_out.write(json.dumps(videos_new, indent=2))
-
-    def __parse_video_comments(self, video_id):
-        """
-        Загружает и возвращает все страницы комментариев к видео по его id
-        """
-        next_page_token = None
-        responses = []
-        while True:
-            response = self.__commentThreads_request(video_id, next_page_token)
-            # есть topComment, есть replies. Если реплаев меньше, чем totalReplyCount,
-            # нужно делать отдельный запрос Comments.list
-            for thread in response["items"]:
-                if "replies" in thread and thread["snippet"]["totalReplyCount"] > len(thread["replies"]):
-                    thread["replies"]["comments"] = []
-                    next_replies_token = None
-                    while True:
-                        parent_id = thread["snippet"]["topLevelComment"]["id"]
-                        replies_response = self.__comments_list_request(parent_id, next_replies_token)
-
-                        thread["replies"]["comments"] += replies_response["items"]
-                        
-                        if "nextPageToken" not in replies_response:
-                            break
-                        next_replies_token = replies_response["nextPageToken"]
-            
-            responses.append(response)
-            
-            if "nextPageToken" not in response:
-                break
-            next_page_token = response["nextPageToken"]
-            
-        return [thread for response in responses for thread in response["items"]]
-
     def parse_comments(
         self,
         query,
@@ -388,3 +351,62 @@ class Parser:
 
             if verbose:
                 print(f"Query \'{query}\', video №{idx}, videoId {video_id}, {comments_saved} comments")
+
+    def get_parsed_videos(self, query: str = None, video_file: str = None) -> dict | list:
+        """
+        Если query = None, возвращает словарь, где ключи - запросы,
+        а значения - массивы с видео, полученными за всё время по этому запросу.
+        Если query передан, возвращает один массив с видео, соответствующими
+        такому запросу. |
+        Если video_file не передан, результаты будут получены из собственного
+        файла, заданного при инициализации. Иначе результат будет получен из
+        переданного файла.
+        """
+        if video_file is None:
+            video_file = self.video_file
+            
+        try:
+            with open(video_file, "r") as f:
+                videos = json.loads(f.read())
+                if query:
+                    return videos.get(query, [])
+                return videos
+        except FileNotFoundError:
+            return [] if query else {}
+
+    def get_parsed_comments(self, video_id: str = None, comment_file: str = None) -> dict | list:
+        """
+        Если video_id = None, возвращает словарь, где ключи - videoId,
+        а значения - массивы со всеми тредами комментариев для данного видео.
+        Если video_id передан, возвращает один массив с тредами, соответствующими
+        данному видео.
+        Если comment_file не передан, результаты будут получены из собственного
+        файла, заданного при инициализации. Иначе результат будет получен из
+        переданного файла.
+        """
+        if comment_file is None:
+            comment_file = self.comment_file
+
+        try:
+            with open(comment_file, "r") as f:
+                threads = json.loads(f.read())
+                if video_id:
+                    return threads.get(video_id, [])
+                return threads
+        except FileNotFoundError:
+            return [] if video_id else {}
+    
+    def join_video_files(self, video_file_1: str, video_file_2: str, output: str) -> None:
+        """
+        Объединяет два файла, хранящие информацию о видео,
+        в один новый файл - output. Старые файлы не удаляются
+        """
+        with open(video_file_1, "r") as fin_1, \
+        open(video_file_2, "r") as fin_2, \
+        open(output, "w") as f_out:
+            videos_1 = json.loads(fin_1.read())
+            videos_2 = json.loads(fin_2.read())
+            videos_new = {}
+            for query in set(videos_1.keys()).union(set(videos_2.keys())):
+                videos_new[query] = videos_1.get(query, []) + videos_2.get(query, [])
+            f_out.write(json.dumps(videos_new, indent=2))

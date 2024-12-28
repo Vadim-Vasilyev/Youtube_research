@@ -1,25 +1,25 @@
 **Формат хранения данных о видео**:
 ```
 {
-	"query_1": [
-			{
-				"videoId": string,
-				"publishedAt": datetime
-				"channelId": string,
-				"title": string,
-				"description": string,
-				"statistics": {
-					"viewCount": int,
-					"likeCount": int,
-					"dislikeCount": int,
-					"commentCount": int
-				}
-			},
-			...
-	],
-	"query_2": [
-	...
-	]
+    "query_1": [
+            {
+                "videoId": string,
+                "publishedAt": datetime
+                "channelId": string,
+                "title": string,
+                "description": string,
+                "statistics": {
+                    "viewCount": int,
+                    "likeCount": int,
+                    "dislikeCount": int,
+                    "commentCount": int
+                }
+            },
+            ...
+    ],
+    "query_2": [
+    ...
+    ]
 }
 
 ```
