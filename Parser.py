@@ -1,4 +1,5 @@
 import googleapiclient.discovery
+from googleapiclient.errors import HttpError
 import json
 
 class Parser:
@@ -33,7 +34,7 @@ class Parser:
         """
         Возвращает содержание api_key_file, которое будет использоваться как токен.
         """
-        with open(api_key_file, "r") as f:
+        with open(api_key_file, "r", encoding="utf8") as f:
             api_key = f.read()
         return api_key
 
@@ -45,13 +46,13 @@ class Parser:
         
         next_page_token = None
         try:
-            with open(self.next_pages_file, "r") as next_pages_file:
+            with open(self.next_pages_file, "r", encoding="utf8") as next_pages_file:
                 next_pages = json.loads(next_pages_file.read())["Search.list"]
                 if query in next_pages:
                     next_page_token = next_pages[query]
         # create file if it does not exist
         except FileNotFoundError:
-            with open(self.next_pages_file, "w") as f:
+            with open(self.next_pages_file, "w", encoding="utf8") as f:
                 f.write(json.dumps({"Search.list": {}, "CommentThreads.list":  {}}))
         
         return next_page_token
@@ -63,12 +64,12 @@ class Parser:
         """
         next_video_idx = 0
         try:
-            with open(self.next_pages_file, "r") as next_pages_file:
+            with open(self.next_pages_file, "r", encoding="utf8") as next_pages_file:
                 next_videos = json.loads(next_pages_file.read())["CommentThreads.list"]
                 if query in next_videos:
                     next_video_idx = next_videos[query]
         except FileNotFoundError:
-            with open(self.next_pages_file, "w") as f:
+            with open(self.next_pages_file, "w", encoding="utf8") as f:
                 f.write(json.dumps({"Search.list": {}, "CommentThreads.list":  {}}))
 
         return next_video_idx
@@ -78,10 +79,10 @@ class Parser:
         Обновляет в next_pages_file информацию о странцие,
         с которой нужно начинать парсить видео по запросу query
         """
-        with open(self.next_pages_file, "r") as f:
+        with open(self.next_pages_file, "r", encoding="utf8") as f:
             tokens = json.loads(f.read())
         tokens["Search.list"][query] = next_page_token
-        with open(self.next_pages_file, "w") as f:
+        with open(self.next_pages_file, "w", encoding="utf8") as f:
             f.write(json.dumps(tokens, indent=2))
 
     def __update_next_video_idx(self, video_file, query):
@@ -89,15 +90,15 @@ class Parser:
         Обновляет в next_pages_file информацию о том, с какого
         видео нужно начинать парсить комментарии по запросу query
         """
-        with open(self.next_pages_file, "r") as f:
+        with open(self.next_pages_file, "r", encoding="utf8") as f:
             indices = json.loads(f.read())
         indices["CommentThreads.list"][query] = indices["CommentThreads.list"].get(query, 0) + 1
-        with open(self.next_pages_file, "w") as f:
+        with open(self.next_pages_file, "w", encoding="utf8") as f:
             f.write(json.dumps(indices, indent=2))
 
     def __save_videos(self, response_search: dict, response_videos: dict, query: str, file: str) -> None:
         """
-        Обрабатывает json, полученный в результате Search-запроса.
+        Обрабатывает ответы, полученные в результате Search-запроса и Videos-запроса.
         Сохраняет информацию о видео в video_file
         """
         response_items = response_search["items"]
@@ -106,6 +107,7 @@ class Parser:
         for i, v in enumerate(response_items):
             statistics = response_videos["items"][i]["statistics"]
             statistics.pop("favoriteCount")
+            description = response_videos["items"][i]["snippet"]["description"]
             
             new_query_videos.append(
                 {
@@ -113,30 +115,30 @@ class Parser:
                     "publishedAt": v["snippet"]["publishedAt"],
                     "channelId": v["snippet"]["channelId"],
                     "title": v["snippet"]["title"],
-                    "description": v["snippet"]["description"],
+                    "description": description,
                     "statistics": statistics
                 }
             )
 
         try:
-            with open(file, "r") as f:
+            with open(file, "r", encoding="utf8") as f:
                 all_videos = json.loads(f.read())
         except FileNotFoundError:
             all_videos = {}
 
         all_videos[query] = all_videos.get(query, []) + new_query_videos
-        with open(file, "w") as f:
-            f.write(json.dumps(all_videos, indent=2))
+        with open(file, "w", encoding="utf8") as f:
+            f.write(json.dumps(all_videos, indent=2, ensure_ascii=False))
 
     def __save_comments(self, threads: list, video_id: str, comment_file: str = None) -> None:
         if comment_file is None:
             comment_file = self.comment_file
 
         try:
-            with open(comment_file, "r") as f:
+            with open(comment_file, "r", encoding="utf8") as f:
                 all_threads = json.loads(f.read())
         except FileNotFoundError:
-            with open(comment_file, "w") as f:
+            with open(comment_file, "w", encoding="utf8") as f:
                 f.write(json.dumps({}))
                 all_threads = {}
 
@@ -166,8 +168,8 @@ class Parser:
             total_comments += 1 + len(item["replies"])
 
         all_threads[video_id] = all_threads.get(video_id, [])  + items
-        with open(comment_file, "w") as f:
-            f.write(json.dumps(all_threads, indent=2))
+        with open(comment_file, "w", encoding='utf8') as f:
+            f.write(json.dumps(all_threads, indent=2, ensure_ascii=False))
 
         return total_comments
         
@@ -201,7 +203,7 @@ class Parser:
         videos = response_search["items"]
         video_ids = ",".join([video["id"]["videoId"] for video in videos])
         request = self.youtube.videos().list(
-            part="statistics",
+            part="snippet,statistics",
             id=video_ids
         )
         response = request.execute()
@@ -220,7 +222,14 @@ class Parser:
             pageToken=next_page_token,
             maxResults=100
         )
-        response = request.execute()
+        try:
+            response = request.execute()
+        except HttpError as err:
+            if "disabled comments" in err._get_reason():
+                response = dict(items=[])
+            else:
+                raise err
+            
         return response
 
     def __comments_list_request(self, parent_id: str, next_page_token: str):
@@ -333,14 +342,16 @@ class Parser:
         if comment_file is None:
             comment_file = self.comment_file
             
-        with open(video_file, "r") as f:
+        with open(video_file, "r", encoding="utf8") as f:
             videos = json.loads(f.read())
             
         video_processed = 0
         while video_processed < max_videos:
             idx = self.__extract_next_video_idx(video_file, query)
             if idx == len(videos[query]):
+                print("Out of videos. Parse more videos using parse_videos method.")
                 break
+                
             video_id = videos[query][idx]["videoId"]
             
             threads = self.__parse_video_comments(video_id)
@@ -366,7 +377,7 @@ class Parser:
             video_file = self.video_file
             
         try:
-            with open(video_file, "r") as f:
+            with open(video_file, "r", encoding="utf8") as f:
                 videos = json.loads(f.read())
                 if query:
                     return videos.get(query, [])
@@ -388,7 +399,7 @@ class Parser:
             comment_file = self.comment_file
 
         try:
-            with open(comment_file, "r") as f:
+            with open(comment_file, "r", encoding="utf8") as f:
                 threads = json.loads(f.read())
                 if video_id:
                     return threads.get(video_id, [])
@@ -401,12 +412,20 @@ class Parser:
         Объединяет два файла, хранящие информацию о видео,
         в один новый файл - output. Старые файлы не удаляются
         """
-        with open(video_file_1, "r") as fin_1, \
-        open(video_file_2, "r") as fin_2, \
-        open(output, "w") as f_out:
+        with open(video_file_1, "r", encoding="utf8") as fin_1, \
+        open(video_file_2, "r", encoding="utf8") as fin_2, \
+        open(output, "w", encoding="utf8") as f_out:
             videos_1 = json.loads(fin_1.read())
             videos_2 = json.loads(fin_2.read())
             videos_new = {}
             for query in set(videos_1.keys()).union(set(videos_2.keys())):
                 videos_new[query] = videos_1.get(query, []) + videos_2.get(query, [])
             f_out.write(json.dumps(videos_new, indent=2))
+
+    def num_of_comments(self, comment_file: str = None) -> int:
+        if comment_file is None:
+            comment_file = self.comment_file
+
+        threads = self.get_parsed_comments(comment_file=comment_file)
+        num = sum([sum([len(thread["replies"]) + 1 for thread in videoThreads]) for _, videoThreads in threads.items()])
+        return num
