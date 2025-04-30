@@ -275,45 +275,43 @@ class ParserDB:
             
         return [thread for response in responses for thread in response["items"]]
 
-    def __graph_from_threads(self, threads_by_videos):
-        nodes = set()
-        edges = set()
-        
-        reply_count = 0
-        problem_count = 0
-        for videoId, videoThreads, query in threads_by_videos:
-            videoThreads = json.loads(videoThreads)
-            users = set()
-            thread_authors = dict() # {topLevelComment: author}
-            nodes.add((videoId, "video", query))
-            for thread in videoThreads:
-                thread = json.loads(thread)
-                for comment in thread:
-                    users.add(comment["authorDisplayName"])
-                    nodes.add((comment["authorDisplayName"], "user", "USER"))
-                    if comment["topLevelComment"] == comment["commentId"]:
-                        thread_authors[comment["topLevelComment"]] = comment["authorDisplayName"]
-                    
-            for thread in videoThreads:
-                thread = json.loads(thread)
-                thread_author = thread_authors[thread[0]["topLevelComment"]]
-                for comment in thread:
-                    if comment["authorDisplayName"] == thread_author:
-                        edges.add((comment["authorDisplayName"], videoId))
-                    elif "@" not in comment["text"]:
-                        edges.add((comment["authorDisplayName"], thread_author))
-                    else:
-                        reply_to = None
-                        for user in users:
-                            if user in comment["text"]:
-                                reply_to = user
-                                break
-                        if reply_to is not None:
-                            edges.add((comment["authorDisplayName"], reply_to))
-                        else:
-                            problem_count += 1
-                            
-        return nodes, edges, problem_count
+    def get_threads(self, query):
+        """
+        Returns all loaded threads
+        """
+        self.cursor.execute("""
+        SELECT videoId, videoThreads, query
+        FROM (
+            SELECT
+                videoId,
+                json_group_array(threads) AS videoThreads
+            FROM (
+                SELECT
+                    topLevelComment,
+                    videoId,
+                    json_group_array(
+                        json_object(
+                            'commentId', commentId,
+                            'topLevelComment', topLevelComment,
+                            'text', text,
+                            'authorDisplayName', authorDisplayName
+                        )
+                ) AS threads
+                FROM
+                    Comments
+                GROUP BY
+                    topLevelComment,
+                    videoId
+                )
+            GROUP BY
+                videoId
+        ) AS t1
+        JOIN 
+            Videos USING(videoId)
+        WHERE query = ?
+        """, (query,))
+        threads_by_videos = self.cursor.fetchall()
+        return threads_by_videos
 
     def parse_videos(
         self, 
@@ -372,52 +370,7 @@ class ParserDB:
 
             if verbose:
                 print(f"Query \'{query}\', videoId {video_id}, {comments_saved} comments")
-
-    def make_graph(self, folder: str):
-        """
-        Builds a graph showing interactions between commenters under videos.
-        The graph is saved to files in the specified folder in the format
-        required for import into Gephi.
-        """
-        self.cursor.execute("""
-        SELECT videoId, videoThreads, query
-        FROM
-            (SELECT
-                videoId,
-                json_group_array(threads) AS videoThreads
-            FROM
-                (SELECT
-                    topLevelComment,
-                    videoId,
-                    json_group_array(
-                        json_object(
-                            'commentId', commentId,
-                            'topLevelComment', topLevelComment,
-                            'text', text,
-                            'authorDisplayName', authorDisplayName
-                        )
-                ) AS threads
-                FROM
-                    Comments
-                GROUP BY
-                    topLevelComment,
-                    videoId
-                )
-            GROUP BY
-                videoId) AS t1
-            JOIN Videos USING(videoId)
-        """)
-        threads_by_videos = self.cursor.fetchall()
-        nodes, edges, problem_count = self.__graph_from_threads(threads_by_videos)
-
-        nodes = [dict(id=n[0], label=n[0], nodeType=n[1], query=n[2]) for n in nodes]
-        edges = [dict(source=e[0], target=e[1]) for e in edges]
-        nodes_df = pd.DataFrame(nodes)
-        nodes_df["size"] = np.where(nodes_df["nodeType"] == "video", 20, 1)
-        nodes_df.to_csv(f"{folder}/nodes.csv", index=False, encoding="utf-8")
-        pd.DataFrame(edges).to_csv(f"{folder}/edges.csv", index=False, encoding="utf-8")
-        return nodes, edges
-
+        
     def describe(self):
         """
         Returns information about the number of videos and comments
